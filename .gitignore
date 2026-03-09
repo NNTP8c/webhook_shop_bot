@@ -1,0 +1,32 @@
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+webhook_logs/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS Cache
+.DS_Store
+Thumbs.db
