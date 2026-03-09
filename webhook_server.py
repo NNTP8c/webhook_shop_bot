@@ -5,7 +5,6 @@ import logging
 from decimal import Decimal, InvalidOperation
 
 import mysql.connector
-from mysql.connector import Error
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from telegram import Bot
@@ -26,7 +25,7 @@ DB_CONFIG = {
     "charset": "utf8mb4",
 }
 
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=BOT_TOKEN) if BOT_TOKEN else None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,12 +78,37 @@ def save_webhook_log(payload):
         )
         conn.commit()
     except Exception as e:
-        logging.exception("Lỗi ghi webhook log: %s", e)
+        logging.exception("Loi ghi webhook log: %s", e)
     finally:
         if cursor:
             cursor.close()
         if conn and conn.is_connected():
             conn.close()
+
+
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({
+        "success": True,
+        "message": "Webhook server dang chay"
+    }), 200
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({
+        "success": True,
+        "service": "sepay-webhook",
+        "status": "ok"
+    }), 200
+
+
+@app.route("/sepay/webhook", methods=["GET"])
+def sepay_webhook_check():
+    return jsonify({
+        "success": True,
+        "message": "Sepay webhook endpoint dang hoat dong. Hay gui POST request."
+    }), 200
 
 
 @app.route("/sepay/webhook", methods=["POST"])
@@ -96,6 +120,7 @@ def sepay_webhook():
         return jsonify({"success": False, "message": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True) or {}
+    logging.info("Nhan webhook payload: %s", payload)
     save_webhook_log(payload)
 
     transfer_type = payload.get("transferType")
@@ -111,6 +136,8 @@ def sepay_webhook():
 
     conn = None
     cursor = None
+    order = None
+    delivered_lines = []
 
     try:
         conn = get_db_connection()
@@ -205,7 +232,6 @@ def sepay_webhook():
             (str(sepay_transaction_id), order["id"])
         )
 
-        delivered_lines = []
         for idx, p in enumerate(products, start=1):
             cursor.execute(
                 """
@@ -242,37 +268,30 @@ def sepay_webhook():
             conn.close()
 
     try:
-        text = (
-            f"✅ THANH TOÁN THÀNH CÔNG\n\n"
-            f"Mã đơn: {order['order_code']}\n"
-            f"Sản phẩm: {order['tenloai']}\n"
-            f"Số lượng: {order['so_luong']}\n"
-            f"Số tiền: {format_currency(order['tong_tien'])}\n\n"
-            f"📦 THÔNG TIN SẢN PHẨM:\n\n"
-            + "\n\n".join(delivered_lines)
-            + "\n\n🔒 Vui lòng lưu lại thông tin ngay."
-        )
+        if bot:
+            text = (
+                f"✅ THANH TOÁN THÀNH CÔNG\n\n"
+                f"Mã đơn: {order['order_code']}\n"
+                f"Sản phẩm: {order['tenloai']}\n"
+                f"Số lượng: {order['so_luong']}\n"
+                f"Số tiền: {format_currency(order['tong_tien'])}\n\n"
+                f"📦 THÔNG TIN SẢN PHẨM:\n\n"
+                + "\n\n".join(delivered_lines)
+                + "\n\n🔒 Vui lòng lưu lại thông tin ngay."
+            )
 
-        bot.send_message(chat_id=order["telegram_chat_id"], text=text)
+            bot.send_message(chat_id=order["telegram_chat_id"], text=text)
+        else:
+            logging.warning("BOT_TOKEN rong, bo qua gui Telegram.")
     except Exception as e:
-        logging.exception("Lỗi gửi Telegram: %s", e)
+        logging.exception("Loi gui Telegram: %s", e)
 
     return jsonify({"success": True, "message": "Payment confirmed"}), 200
 
 
-# if __name__ == "__main__":
-#     if not BOT_TOKEN:
-#         raise ValueError("Thiếu BOT_TOKEN")
-#     if not SEPAY_API_KEY:
-#         logging.warning("SEPAY_API_KEY đang trống. Webhook sẽ không kiểm tra Authorization.")
-
-#     app.run(host="0.0.0.0", port=5000, debug=False)
-
 if __name__ == "__main__":
-    if not BOT_TOKEN:
-        raise ValueError("Thiếu BOT_TOKEN")
     if not SEPAY_API_KEY:
-        logging.warning("SEPAY_API_KEY đang trống. Webhook sẽ không kiểm tra Authorization.")
+        logging.warning("SEPAY_API_KEY dang trong. Webhook se khong kiem tra Authorization.")
 
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
